@@ -1,0 +1,8 @@
+error: failed to select a version for `iced`.
+    ... required by package `disk-usage-visualizer v0.1.0 (C:\Users\Nabeed\OneDrive\Documents\GitHub\disk-usage-visualizer)`
+versions that meet the requirements `^0.12` (locked to 0.12.1) are: 0.12.1
+
+package `disk-usage-visualizer` depends on `iced` with feature `widgets` but `iced` does not have that feature.
+
+
+failed to select a version for `iced` which could resolve this conflict
