@@ -147,8 +147,8 @@ impl Application for DiskVisualizer {
 impl DiskVisualizer {
     fn view_home(&self) -> Element<'_, Message> {
         Column::new()
-            .push(Text::new("DATA VISULIZER").size(40))
-            .push(Text::new("By Saalim & Ryu").size(20))
+            .push(Text::new("DATA VISUALIZER").size(40))
+            .push(Text::new("By Saaim & Ryu").size(20))
             .push(Text::new("SELECT DIRECTORY").size(24))
             .push(Button::new("BROWSE").on_press(Message::PickFolder))
             .push(Button::new("EXIT").on_press(Message::ExitApp))
