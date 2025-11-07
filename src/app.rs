@@ -1,7 +1,11 @@
 use iced::{
-    executor, Application, Command, Element, Theme,
+    executor, Application, Command, Element, Theme, Alignment, Length,
     widget::{Button, Column, ProgressBar, Scrollable, Text},
 };
+
+
+
+
 use rfd::FileDialog;
 use std::{collections::HashMap, fs, path::Path};
 use std::fs::File;
@@ -143,18 +147,38 @@ impl Application for DiskVisualizer {
     }
 }
 
+
 impl DiskVisualizer {
+    //Make the UI look better
     fn view_home(&self) -> Element<'_, Message> {
-        Column::new()
-            .push(Text::new("DATA VISULIZER").size(40))
-            .push(Text::new("By Saalim & Ryu").size(20))
-            .push(Text::new("SELECT DIRECTORY").size(24))
-            .push(Button::new("BROWSE").on_press(Message::PickFolder))
-            .push(Button::new("EXIT").on_press(Message::ExitApp))
-            .spacing(20)
-            .padding(50)
-            .into()
-    }
+    use iced::widget::Container;
+
+    let content = Column::new()
+        .push(Text::new("DATA VISUALIZER").size(50))
+        .push(Text::new("By Saaim & Ryu").size(20))
+        .push(Text::new("SELECT DIRECTORY").size(30))
+        .push(
+            Button::new("               BROWSE")
+                .on_press(Message::PickFolder)
+                .width(Length::Fixed(200.0)), // optional width
+        )
+        .push(
+            Button::new("                  EXIT")
+                .on_press(Message::ExitApp)
+                .width(Length::Fixed(200.0)),
+        )
+        .spacing(20)
+        .align_items(Alignment::Center);
+
+    Container::new(content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .center_x()
+        .center_y()
+        .padding(50)
+        .into()
+}
+
 
     fn view_folder_select(&self) -> Element<'_, Message> {
         Column::new()
