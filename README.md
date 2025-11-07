@@ -18,7 +18,7 @@ The project is drive by multiple dependencies.
 ## Supported Operating Systems
 
 | Operating Systems |
-|-|
-| - [x] Linux |
-| - [x] Window |
-| - [x] MacOS|
+| - |
+| ☑ Linux |
+| ☑ Window |
+| ☑ MacOS |
