@@ -15,7 +15,7 @@ pub enum Message {
     GoTo(Screen),
     PickFolder,
     FolderPicked(Option<String>),
-    ScanCompleted(Vec<(String, u64)>),
+    ScanCompleted(Result<Vec<(String, u64)>, String>),
     DeleteFile(String),
     DeleteDuplicates(Vec<String>),
     MakeDuplicate(String),
@@ -23,6 +23,8 @@ pub enum Message {
     MoveDestinationPicked(String, Option<String>),
     ExitApp,
     ViewDuplicates,
+    ShowError(String),
+    ClearError,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,6 +41,7 @@ pub struct DiskVisualizer {
     pub files: Vec<(String, u64)>,
     pub folders: Vec<(String, u64)>,
     pub duplicates: HashMap<String, Vec<String>>,
+    pub error_message: Option<String>,
 }
 
 impl Application for DiskVisualizer {
@@ -55,6 +58,7 @@ impl Application for DiskVisualizer {
                 files: vec![],
                 folders: vec![],
                 duplicates: HashMap::new(),
+                error_message: None,
             },
             Command::none(),
         )
@@ -68,9 +72,12 @@ impl Application for DiskVisualizer {
         match message {
             Message::GoTo(screen) => {
                 self.screen = screen;
+                self.error_message = None;
                 Command::none()
             }
+
             Message::PickFolder => Command::perform(pick_folder(), Message::FolderPicked),
+
             Message::FolderPicked(folder) => {
                 if let Some(path) = folder.clone() {
                     self.selected_folder = Some(path.clone());
@@ -78,56 +85,82 @@ impl Application for DiskVisualizer {
                 }
                 Command::none()
             }
-            Message::ScanCompleted(files) => {
-                self.files = files.clone();
-                self.folders = aggregate_folder_sizes(&files);
-                self.duplicates = find_duplicates(&files);
-                self.screen = Screen::Visualization;
-                Command::none()
-            }
+
+            Message::ScanCompleted(result) => match result {
+                Ok(files) => {
+                    self.files = files.clone();
+                    self.folders = aggregate_folder_sizes(&files);
+                    self.duplicates = find_duplicates(&files);
+                    self.screen = Screen::Visualization;
+                    self.error_message = None;
+                    Command::none()
+                }
+                Err(err) => Command::perform(async move { err }, Message::ShowError),
+            },
+
             Message::DeleteFile(path) => {
-                let _ = trash::delete(&Path::new(&path));
+                if let Err(e) = trash::delete(&Path::new(&path)) {
+                    return Command::perform(async move { e.to_string() }, Message::ShowError);
+                }
                 self.files.retain(|(p, _)| p != &path);
-                self.folders = aggregate_folder_sizes(&self.files);
-                self.duplicates = find_duplicates(&self.files);
+                self.refresh_data();
                 Command::none()
             }
+
             Message::DeleteDuplicates(paths) => {
-                for path in paths {
-                    let _ = trash::delete(&Path::new(&path));
-                    self.files.retain(|(p, _)| p != &path);
-                }
-                self.folders = aggregate_folder_sizes(&self.files);
-                self.duplicates = find_duplicates(&self.files);
-                Command::none()
-            }
-            Message::MakeDuplicate(path) => {
-                if let Some(new_path) = make_duplicate(&path) {
-                    self.files.push((new_path.clone(), fs::metadata(&new_path).map(|m| m.len()).unwrap_or(0)));
-                    self.folders = aggregate_folder_sizes(&self.files);
-                    self.duplicates = find_duplicates(&self.files);
-                }
-                Command::none()
-            }
-            Message::MoveFile(path) => {
-                // Pick destination folder to move the file
-                Command::perform(pick_folder(), move |dest| Message::MoveDestinationPicked(path.clone(), dest))
-            }
-            Message::MoveDestinationPicked(path, dest_opt) => {
-                if let Some(dest) = dest_opt {
-                    if move_file(&path, &dest) {
-                        // Remove from current list and refresh
-                        self.files.retain(|(p, _)| p != &path);
-                        self.folders = aggregate_folder_sizes(&self.files);
-                        self.duplicates = find_duplicates(&self.files);
+                for path in &paths {
+                    if let Err(e) = trash::delete(&Path::new(path)) {
+                        return Command::perform(async move { e.to_string() }, Message::ShowError);
                     }
                 }
+                self.files.retain(|(p, _)| !paths.contains(p));
+                self.refresh_data();
                 Command::none()
             }
+
+            Message::MakeDuplicate(path) => {
+                match make_duplicate(&path) {
+                    Ok(new_path) => {
+                        if let Ok(size) = fs::metadata(&new_path).map(|m| m.len()) {
+                            self.files.push((new_path.clone(), size));
+                            self.refresh_data();
+                        }
+                    }
+                    Err(e) => return Command::perform(async move { e }, Message::ShowError),
+                }
+                Command::none()
+            }
+
+            Message::MoveFile(path) => {
+                Command::perform(pick_folder(), move |dest| Message::MoveDestinationPicked(path.clone(), dest))
+            }
+
+            Message::MoveDestinationPicked(path, dest_opt) => {
+                if let Some(dest) = dest_opt {
+                    if let Err(e) = move_file(&path, &dest) {
+                        return Command::perform(async move { e }, Message::ShowError);
+                    }
+                    self.files.retain(|(p, _)| p != &path);
+                    self.refresh_data();
+                }
+                Command::none()
+            }
+
             Message::ViewDuplicates => {
                 self.screen = Screen::Duplicates;
                 Command::none()
             }
+
+            Message::ShowError(err) => {
+                self.error_message = Some(err);
+                Command::none()
+            }
+
+            Message::ClearError => {
+                self.error_message = None;
+                Command::none()
+            }
+
             Message::ExitApp => {
                 std::process::exit(0);
             }
@@ -135,16 +168,33 @@ impl Application for DiskVisualizer {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        match self.screen {
+        let mut content = match self.screen {
             Screen::Home => self.view_home(),
             Screen::FolderSelect => self.view_folder_select(),
             Screen::Visualization => self.view_visualization(),
             Screen::Duplicates => self.view_duplicates(),
+        };
+
+        // If error message exists, show it at bottom
+        if let Some(ref err) = self.error_message {
+            content = Column::new()
+                .push(content)
+                .push(Text::new(format!("⚠ Error: {}", err)).size(18))
+                .push(Button::new("Dismiss").on_press(Message::ClearError))
+                .spacing(10)
+                .into();
         }
+
+        content
     }
 }
 
 impl DiskVisualizer {
+    fn refresh_data(&mut self) {
+        self.folders = aggregate_folder_sizes(&self.files);
+        self.duplicates = find_duplicates(&self.files);
+    }
+
     fn view_home(&self) -> Element<'_, Message> {
         Column::new()
             .push(Text::new("DATA VISUALIZER").size(40))
@@ -177,8 +227,14 @@ impl DiskVisualizer {
             column = column.push(Text::new(format!("Folder: {}", folder)));
         }
 
-        let total_size: u64 = self.files.iter().map(|(_, s)| *s).sum();
+        if self.files.is_empty() {
+            return column
+                .push(Text::new("No files found or failed to scan folder."))
+                .push(Button::new("Back").on_press(Message::GoTo(Screen::FolderSelect)))
+                .into();
+        }
 
+        let total_size: u64 = self.files.iter().map(|(_, s)| *s).sum();
         column = column.push(Text::new("Top Files:"));
         for (name, size) in self.files.iter().take(5) {
             let ratio = *size as f32 / total_size as f32;
@@ -188,17 +244,9 @@ impl DiskVisualizer {
                 .push(
                     Column::new()
                         .push(Button::new("Delete").on_press(Message::DeleteFile(name.clone())))
-                        .push(Button::new("Make Duplicate").on_press(Message::MakeDuplicate(name.clone())))
-                        .push(Button::new("Move File").on_press(Message::MoveFile(name.clone())))
+                        .push(Button::new("Duplicate").on_press(Message::MakeDuplicate(name.clone())))
+                        .push(Button::new("Move").on_press(Message::MoveFile(name.clone()))),
                 );
-        }
-
-        column = column.push(Text::new("Top Folders:"));
-        for (folder, size) in self.folders.iter().take(5) {
-            let ratio = *size as f32 / total_size as f32;
-            column = column
-                .push(Text::new(format!("{folder} ({:.2} MB)", *size as f32 / 1_000_000.0)))
-                .push(ProgressBar::new(0.0..=1.0, ratio));
         }
 
         column = column
@@ -237,97 +285,92 @@ async fn pick_folder() -> Option<String> {
     FileDialog::new().pick_folder().map(|p| p.display().to_string())
 }
 
-// Async scan
-async fn scan_folder_async(path: String) -> Vec<(String, u64)> {
+// Async scan with error handling
+async fn scan_folder_async(path: String) -> Result<Vec<(String, u64)>, String> {
     let mut files = vec![];
-
     for entry in WalkDir::new(&path)
         .into_iter()
         .filter_map(Result::ok)
         .filter(|e| e.file_type().is_file())
     {
-        if let Ok(metadata) = fs::metadata(entry.path()) {
-            files.push((
-                entry.path().display().to_string(),
-                metadata.len(),
-            ));
+        match fs::metadata(entry.path()) {
+            Ok(metadata) => files.push((entry.path().display().to_string(), metadata.len())),
+            Err(e) => eprintln!("Failed to read metadata for {}: {}", entry.path().display(), e),
         }
     }
 
+    if files.is_empty() {
+        return Err("No readable files found or access denied.".into());
+    }
+
     files.sort_by(|a, b| b.1.cmp(&a.1));
-    files
+    Ok(files)
 }
 
-// Folder size aggregation
 fn aggregate_folder_sizes(files: &[(String, u64)]) -> Vec<(String, u64)> {
     let mut folder_sizes: HashMap<String, u64> = HashMap::new();
-
     for (path, size) in files {
         if let Some(parent) = Path::new(path).parent() {
             let folder = parent.display().to_string();
             *folder_sizes.entry(folder).or_insert(0) += *size;
         }
     }
-
     let mut folder_vec: Vec<(String, u64)> = folder_sizes.into_iter().collect();
     folder_vec.sort_by(|a, b| b.1.cmp(&a.1));
     folder_vec
 }
 
-
-// File hash
 fn compute_hash(path: &str) -> Option<String> {
     let file = File::open(path).ok()?;
     let mut reader = BufReader::new(file);
     let mut hasher = blake3::Hasher::new();
     let mut buffer = [0; 4096];
-
     while let Ok(n) = reader.read(&mut buffer) {
-        if n == 0 { break; }
+        if n == 0 {
+            break;
+        }
         hasher.update(&buffer[..n]);
     }
-
     Some(hasher.finalize().to_hex().to_string())
 }
 
-// Duplicate detection
 fn find_duplicates(files: &[(String, u64)]) -> HashMap<String, Vec<String>> {
     let mut map: HashMap<String, Vec<String>> = HashMap::new();
-
     for (path, _) in files {
         if let Some(hash) = compute_hash(path) {
             map.entry(hash).or_default().push(path.clone());
         }
     }
-
     map.into_iter()
         .filter(|(_, group)| group.len() > 1)
         .collect()
 }
 
-// Create a duplicate file
-fn make_duplicate(original_path: &str) -> Option<String> {
+fn make_duplicate(original_path: &str) -> Result<String, String> {
     let original = Path::new(original_path);
-    let parent = original.parent()?;
-    let file_name = original.file_name()?.to_string_lossy();
+    let parent = original
+        .parent()
+        .ok_or("Failed to get parent directory.")?;
+    let file_name = original
+        .file_name()
+        .ok_or("Failed to read file name.")?
+        .to_string_lossy();
     let new_name = format!("{}_copy", file_name);
     let new_path = parent.join(new_name);
 
-    fs::copy(original, &new_path).ok()?;
-    Some(new_path.display().to_string())
+    fs::copy(original, &new_path)
+        .map_err(|e| format!("Failed to copy file: {}", e))?;
+    Ok(new_path.display().to_string())
 }
 
-// Move file to destination folder
-fn move_file(original_path: &str, dest_folder: &str) -> bool {
+fn move_file(original_path: &str, dest_folder: &str) -> Result<(), String> {
     let src = Path::new(original_path);
     if let Some(file_name) = src.file_name() {
         let dest = Path::new(dest_folder).join(file_name);
-        if let Err(e) = fs::rename(src, &dest) {
-            eprintln!("Failed to move file: {}", e);
-            return false;
-        }
-        return true;
+        fs::rename(src, &dest)
+            .map_err(|e| format!("Failed to move file: {}", e))?;
+        Ok(())
+    } else {
+        Err("Invalid file path.".into())
     }
-    false
 }
-
