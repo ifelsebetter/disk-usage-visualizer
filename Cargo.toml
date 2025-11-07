@@ -1,7 +1,13 @@
 [package]
-name = "disk-usage-visualizer"
+name = "disk_visualizer"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
-iced = {version = "0.12", features = ["widgets", "tokio"] }
+iced = { version = "0.12", features = ["tokio"] }
+walkdir = "2.4"
+rfd = "0.12"
+trash = "3.0"
+blake3 = "1.5"
+tokio = { version = "1.35", features = ["rt-multi-thread", "macros"] }
+
