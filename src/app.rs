@@ -2,6 +2,7 @@ use iced::{
     executor, Application, Command, Element, Theme,
     widget::{Button, Column, ProgressBar, Scrollable, Text},
 };
+
 use rfd::FileDialog;
 use std::{collections::HashMap, fs, path::Path};
 use std::fs::File;
