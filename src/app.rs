@@ -5,7 +5,6 @@ use iced::{
 
 
 
-
 use rfd::FileDialog;
 use std::{collections::HashMap, fs, path::Path};
 use std::fs::File;
@@ -26,6 +25,7 @@ pub enum Message {
     MoveDestinationPicked(String, Option<String>),
     ExitApp,
     ViewDuplicates,
+    ToggleTheme,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,7 +42,10 @@ pub struct DiskVisualizer {
     pub files: Vec<(String, u64)>,
     pub folders: Vec<(String, u64)>,
     pub duplicates: HashMap<String, Vec<String>>,
+    pub theme: Theme, 
 }
+
+
 
 impl Application for DiskVisualizer {
     type Executor = executor::Default;
@@ -58,6 +61,7 @@ impl Application for DiskVisualizer {
                 files: vec![],
                 folders: vec![],
                 duplicates: HashMap::new(),
+                theme: Theme::Light,
             },
             Command::none(),
         )
@@ -131,6 +135,18 @@ impl Application for DiskVisualizer {
                 self.screen = Screen::Duplicates;
                 Command::none()
             }
+
+
+            Message::ToggleTheme => {
+                self.theme = match self.theme {
+                    Theme::Light => Theme::Dark,
+                    Theme::Dark => Theme::Light,
+                    _ => Theme::Light, 
+                };
+                Command::none()
+            }
+
+
             Message::ExitApp => {
                 std::process::exit(0);
             }
@@ -145,6 +161,12 @@ impl Application for DiskVisualizer {
             Screen::Duplicates => self.view_duplicates(),
         }
     }
+
+
+    fn theme(&self) -> Theme {
+    self.theme.clone()
+    }
+
 }
 
 
@@ -186,11 +208,21 @@ impl DiskVisualizer {
                     .on_press(Message::GoTo(Screen::FolderSelect))
                     .width(Length::Fixed(200.0)),
             )
+
+            .push(
+    Button::new("                       Theme")
+                .on_press(Message::ToggleTheme)
+                .width(Length::Fixed(200.0))
+                .style(iced::theme::Button::Primary),
+        )
+
+
             .push(
                 Button::new("                   EXIT")
                     .on_press(Message::ExitApp)
                     .width(Length::Fixed(200.0)),
             )
+
             .spacing(20)
             .align_items(Alignment::Center);
 
