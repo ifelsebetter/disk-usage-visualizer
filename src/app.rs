@@ -210,7 +210,7 @@ impl DiskVisualizer {
             )
 
             .push(
-    Button::new("                       Theme")
+    Button::new("                Theme")
                 .on_press(Message::ToggleTheme)
                 .width(Length::Fixed(200.0))
                 .style(iced::theme::Button::Primary),
