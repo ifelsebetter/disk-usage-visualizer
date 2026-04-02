@@ -106,5 +106,5 @@ This will launch the **GUI application**.
 
 **Developed by:**
 
-* Saaim
-* Ryu
+* Syed Saaim Asif Chashoo (Saaim)
+* Tatsuhiro Noda (Ryu)
